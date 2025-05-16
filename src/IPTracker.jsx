@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import bgPattern from "./images/pattern-bg-desktop.png";
 import searchIcon from "./images/icon-arrow.svg";
+import locationIcon from "./images/icon-location.svg"; // used for custom marker
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -13,6 +14,12 @@ const IPTracker = () => {
   const [error, setError] = useState(false);
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
+
+  const customIcon = new L.Icon({
+    iconUrl: locationIcon,
+    iconSize: [40, 50], // adjust for your SVG size
+    iconAnchor: [20, 50],
+  });
 
   const fetchIpData = async (input) => {
     try {
@@ -31,7 +38,6 @@ const IPTracker = () => {
         location: {
           region: data.location.region,
           city: data.location.city,
-          postalCode: data.location.postalCode,
           timezone: data.location.timezone,
           lat: data.location.lat,
           lng: data.location.lng,
@@ -64,7 +70,15 @@ const IPTracker = () => {
       pan: { duration: 1 },
     });
 
-    L.marker([lat, lng]).addTo(mapInstance.current);
+    // Clear existing markers
+    mapInstance.current.eachLayer((layer) => {
+      if (layer instanceof L.Marker) {
+        mapInstance.current.removeLayer(layer);
+      }
+    });
+
+    // Add custom marker
+    L.marker([lat, lng], { icon: customIcon }).addTo(mapInstance.current);
   };
 
   useEffect(() => {
@@ -96,79 +110,76 @@ const IPTracker = () => {
   }, []);
 
   return (
-    <main className="h-screen font-[Rubik] overflow-hidden">
+    <main className="font-[Roboto,sans-serif] h-screen overflow-hidden">
+      {/* Header Section */}
       <section
-        className="relative h-2/6 bg-cover flex justify-center pt-8"
+        className="relative h-2/6 bg-cover bg-center flex flex-col items-center pt-8 px-4"
         style={{ backgroundImage: `url(${bgPattern})` }}
       >
-        <div className="text-center flex flex-col lg:gap-8 gap-2 -mt-3 lg:mt-0 w-4/5 lg:w-fit">
-          <h1 className="text-white lg:text-3xl text-2xl font-medium">
-            IP Address Tracker
-          </h1>
+        <h1 className="text-white text-2xl lg:text-3xl font-medium mb-4">
+          IP Address Tracker
+        </h1>
 
-          <form
-            onSubmit={handleSubmit}
-            className="relative w-full overflow-hidden"
+        {/* Search */}
+        <form onSubmit={handleSubmit} className="relative w-full max-w-lg">
+          <input
+            type="text"
+            placeholder="Search for any IP address or domain"
+            className={`w-full px-6 py-4 rounded-xl text-lg outline-none text-gray-800 bg-white border ${
+              error ? "border-2 border-red-500" : "border border-transparent"
+            }`}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+
+          <button
+            type="submit"
+            className="absolute right-0 top-0 h-full px-5 bg-black hover:bg-gray-900 rounded-r-xl"
           >
-            <p
-              className={`absolute bottom-0 right-20 text-sm italic text-red-500 ${
-                error ? "" : "hidden"
-              }`}
-            >
+            <img src={searchIcon} alt="Search" />
+          </button>
+          {error && (
+            <p className="text-red-500 text-sm italic mt-1 absolute right-0 -bottom-5">
               Invalid input
             </p>
-            <input
-              type="text"
-              placeholder="Search for any IP address or domain"
-              className={`px-6 py-4 w-full lg:w-[36rem] rounded-xl text-lg outline-none text-[#2b2b2b] ${
-                error ? "border-2 border-red-500" : ""
-              }`}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="absolute right-0 py-4 px-6 bg-black hover:bg-[#2b2b2b] duration-200 rounded-r-xl"
-            >
-              <img src={searchIcon} alt="Search" />
-            </button>
-          </form>
-        </div>
+          )}
+        </form>
 
+        {/* Details */}
         {ipData && (
-          <div className="absolute z-10 -bottom-0 lg:translate-y-1/2 translate-y-2/3 lg:p-8 p-6 w-5/6 max-w-[80rem] rounded-3xl shadow-xl bg-white grid lg:grid-cols-4 text-center lg:text-left lg:gap-4 gap-2">
-            <div className="lg:border-r border-[#737373] flex flex-col">
-              <h4 className="text-[#737373] tracking-wider text-sm font-bold lg:mb-2">
+          <div className="relative z-10 mt-6 w-full max-w-7xl bg-white rounded-3xl shadow-xl grid lg:grid-cols-4 gap-6 px-6 py-8 text-center lg:text-left">
+            <div className="flex flex-col lg:border-r border-gray-400">
+              <h4 className="text-gray-500 text-sm font-bold mb-2 tracking-wider">
                 IP ADDRESS
               </h4>
-              <span className="text-[#2b2b2b] lg:text-3xl text-xl font-bold whitespace-normal">
+              <span className="text-gray-900 text-xl lg:text-2xl font-bold break-words">
                 {ipData.ip}
               </span>
             </div>
 
-            <div className="lg:border-r border-[#737373] flex flex-col">
-              <h4 className="text-[#737373] tracking-wider text-sm font-bold lg:mb-2">
+            <div className="flex flex-col lg:border-r border-gray-400">
+              <h4 className="text-gray-500 text-sm font-bold mb-2 tracking-wider">
                 LOCATION
               </h4>
-              <span className="text-[#2b2b2b] lg:text-3xl text-xl font-bold">
+              <span className="text-gray-900 text-xl lg:text-2xl font-bold break-words">
                 {ipData.location.city}, {ipData.location.region}
               </span>
             </div>
 
-            <div className="lg:border-r border-[#737373] flex flex-col">
-              <h4 className="text-[#737373] tracking-wider text-sm font-bold lg:mb-2">
+            <div className="flex flex-col lg:border-r border-gray-400">
+              <h4 className="text-gray-500 text-sm font-bold mb-2 tracking-wider">
                 TIMEZONE
               </h4>
-              <span className="text-[#2b2b2b] lg:text-3xl text-xl font-bold">
+              <span className="text-gray-900 text-xl lg:text-2xl font-bold">
                 UTC{ipData.location.timezone}
               </span>
             </div>
 
             <div className="flex flex-col">
-              <h4 className="text-[#737373] tracking-wider text-sm font-bold lg:mb-2">
+              <h4 className="text-gray-500 text-sm font-bold mb-2 tracking-wider">
                 ISP
               </h4>
-              <span className="text-[#2b2b2b] lg:text-3xl text-xl font-bold">
+              <span className="text-gray-900 text-xl lg:text-2xl font-bold break-words">
                 {ipData.isp}
               </span>
             </div>
@@ -176,13 +187,9 @@ const IPTracker = () => {
         )}
       </section>
 
-      <section className="h-4/6 bg-[#737373] relative">
-        <img
-          className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2"
-          src="images/icon-location.svg"
-          alt="location marker"
-        />
-        <div ref={mapRef} className="h-full w-full z-0"></div>
+      {/* Map Section */}
+      <section className="h-4/6 relative bg-gray-500">
+        <div ref={mapRef} className="h-full w-full z-0" />
       </section>
     </main>
   );
