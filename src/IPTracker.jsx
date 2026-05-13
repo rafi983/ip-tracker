@@ -1,66 +1,75 @@
-import React, { useEffect, useRef, useState } from "react";
-import bgPattern from "./images/pattern-bg-desktop.png";
-import searchIcon from "./images/icon-arrow.svg";
-import locationIcon from "./images/icon-location.svg"; // used for custom marker
-import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import * as React from "react";
+import searchIcon from "./images/icon-arrow.svg";
+import locationIcon from "./images/icon-location.svg";
+import bgPattern from "./images/pattern-bg-desktop.png";
 
 const API_KEY = import.meta.env.VITE_IPIFY_API_KEY;
 const API_URL = import.meta.env.VITE_IPIFY_API_URL;
+const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const IPV6_REGEX = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|:([0-9a-fA-F]{1,4}:){1,7}|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4})$/;
+const DOMAIN_REGEX = /^(?=.{1,253}$)(?!-)(?:[a-zA-Z0-9-]{1,63}\.)+[a-zA-Z]{2,63}$/;
+
+const normalizeIpifyPayload = (payload) => ({
+  ip: payload.ip,
+  isp: payload.isp,
+  location: {
+    region: payload.location.region,
+    city: payload.location.city,
+    timezone: payload.location.timezone,
+    lat: payload.location.lat,
+    lng: payload.location.lng,
+  },
+});
+
+const normalizeSearchInput = (value) => {
+  const trimmed = value.trim();
+  const withoutProtocol = trimmed.replace(/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//, "");
+  const withoutPath = withoutProtocol.replace(/[/?#].*$/, "");
+  const withoutPort = withoutPath.replace(/:\d+$/, "");
+  return withoutPort;
+};
+
+const expandBareDomain = (input) => {
+  if (input.includes(".")) return input;
+  if (/^[a-zA-Z][a-zA-Z0-9-]{1,62}$/.test(input)) {
+    return `${input}.com`;
+  }
+  return input;
+};
+
+const getQueryParam = (input) =>
+  IPV4_REGEX.test(input) || IPV6_REGEX.test(input) ? "ipAddress" : "domain";
+
+const isValidInput = (input) =>
+  IPV4_REGEX.test(input) || IPV6_REGEX.test(input) || DOMAIN_REGEX.test(input);
+
+const extractApiErrorMessage = async (response) => {
+  try {
+    const payload = await response.json();
+    if (typeof payload?.messages === "string") return payload.messages;
+    if (Array.isArray(payload?.messages) && payload.messages.length > 0) {
+      return payload.messages.join(", ");
+    }
+  } catch {}
+  return "Lookup request failed. Please try again.";
+};
 
 const IPTracker = () => {
-  const [ipData, setIpData] = useState(null);
-  const [query, setQuery] = useState("");
-  const [error, setError] = useState(false);
-  const mapRef = useRef(null);
-  const mapInstance = useRef(null);
+  const [ipData, setIpData] = React.useState(null);
+  const [query, setQuery] = React.useState("");
+  const [error, setError] = React.useState(false);
+  const [errorMessage, setErrorMessage] = React.useState("Invalid input");
+  const mapRef = React.useRef(null);
+  const mapInstance = React.useRef(null);
+  const markerRef = React.useRef(null);
 
   const customIcon = new L.Icon({
     iconUrl: locationIcon,
-    iconSize: [40, 50], // adjust for your SVG size
+    iconSize: [40, 50],
     iconAnchor: [20, 50],
   });
-
-  const fetchIpData = async (input) => {
-    try {
-      setError(false);
-      const ipPattern = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
-      const param = ipPattern.test(input) ? "ipAddress" : "domain";
-
-      const response = await fetch(`${API_URL}${API_KEY}&${param}=${input}`);
-      if (!response.ok) throw new Error("Invalid input");
-
-      const data = await response.json();
-
-      const transformed = {
-        ip: data.ip,
-        isp: data.isp,
-        location: {
-          region: data.location.region,
-          city: data.location.city,
-          timezone: data.location.timezone,
-          lat: data.location.lat,
-          lng: data.location.lng,
-        },
-      };
-
-      setIpData(transformed);
-      updateMap(transformed.location.lat, transformed.location.lng);
-      setQuery("");
-    } catch (err) {
-      console.error(err);
-      setError(true);
-    }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!query.trim()) {
-      setError(true);
-      return;
-    }
-    fetchIpData(query);
-  };
 
   const updateMap = (lat, lng) => {
     if (!mapInstance.current) return;
@@ -70,19 +79,100 @@ const IPTracker = () => {
       pan: { duration: 1 },
     });
 
-    // Clear existing markers
-    mapInstance.current.eachLayer((layer) => {
-      if (layer instanceof L.Marker) {
-        mapInstance.current.removeLayer(layer);
-      }
-    });
+    if (markerRef.current) {
+      markerRef.current.remove();
+    }
 
-    // Add custom marker
-    L.marker([lat, lng], { icon: customIcon }).addTo(mapInstance.current);
+    markerRef.current = L.marker([lat, lng], { icon: customIcon }).addTo(
+      mapInstance.current,
+    );
   };
 
-  useEffect(() => {
-    if (mapRef.current && mapRef.current._leaflet_id != null) {
+  const requestIpData = async (value) => {
+    const normalizedValue = expandBareDomain(normalizeSearchInput(value));
+
+    if (!normalizedValue || !isValidInput(normalizedValue)) {
+      throw new Error("Please enter a valid IP address or domain.");
+    }
+
+    const queryParam = getQueryParam(normalizedValue);
+    if (!API_URL || !API_KEY) {
+      throw new Error("API is not configured. Update .env and restart the server.");
+    }
+
+    const ipifyUrl = `${API_URL}${API_KEY}&${queryParam}=${encodeURIComponent(normalizedValue)}`;
+    let ipifyResponse;
+    try {
+      ipifyResponse = await fetch(ipifyUrl);
+    } catch {
+      throw new Error("Network error. Check your internet connection.");
+    }
+
+    if (!ipifyResponse.ok) {
+      throw new Error(await extractApiErrorMessage(ipifyResponse));
+    }
+
+    const ipifyPayload = await ipifyResponse.json();
+    if (!ipifyPayload.ip || !ipifyPayload.location) {
+      throw new Error("Received invalid data from IP service.");
+    }
+
+    return normalizeIpifyPayload(ipifyPayload);
+  };
+
+  const requestCurrentIpData = async () => {
+    let ipResponse;
+    try {
+      ipResponse = await fetch("https://api.ipify.org?format=json");
+    } catch {
+      throw new Error("Network error. Check your internet connection.");
+    }
+
+    if (!ipResponse.ok) {
+      throw new Error("Could not detect current IP.");
+    }
+
+    const ipPayload = await ipResponse.json();
+    if (!ipPayload.ip) {
+      throw new Error("Could not detect current IP.");
+    }
+
+    return requestIpData(ipPayload.ip);
+  };
+
+  const loadIpData = async (value, shouldResetInput = false) => {
+    try {
+      setError(false);
+      setErrorMessage("");
+      const nextData = await requestIpData(value);
+      setIpData(nextData);
+      updateMap(nextData.location.lat, nextData.location.lng);
+      if (shouldResetInput) setQuery("");
+    } catch (err) {
+      setErrorMessage(err.message || "Something went wrong. Please try again.");
+      setError(true);
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      setErrorMessage("Please enter an IP address or domain.");
+      setError(true);
+      return;
+    }
+
+    loadIpData(trimmedQuery, true);
+  };
+
+  React.useEffect(() => {
+    if (!mapRef.current || mapInstance.current) {
+      return;
+    }
+
+    if (mapRef.current._leaflet_id != null) {
       mapRef.current._leaflet_id = null;
     }
 
@@ -98,15 +188,26 @@ const IPTracker = () => {
       attribution:
         '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(mapInstance.current);
+
+    return () => {
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
+      markerRef.current = null;
+    };
   }, []);
 
-  useEffect(() => {
-    const fetchInitialIp = async () => {
-      const res = await fetch("https://api.ipify.org?format=json");
-      const data = await res.json();
-      fetchIpData(data.ip);
+  React.useEffect(() => {
+    const init = async () => {
+      try {
+        const currentData = await requestCurrentIpData();
+        setIpData(currentData);
+        updateMap(currentData.location.lat, currentData.location.lng);
+      } catch {}
     };
-    fetchInitialIp();
+
+    init();
   }, []);
 
   return (
@@ -129,7 +230,13 @@ const IPTracker = () => {
               error ? "border-2 border-red-500" : "border border-transparent"
             }`}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (error) {
+                setError(false);
+                setErrorMessage("");
+              }
+            }}
           />
 
           <button
@@ -140,7 +247,7 @@ const IPTracker = () => {
           </button>
           {error && (
             <p className="text-red-500 text-sm italic mt-1 absolute right-0 -bottom-5">
-              Invalid input
+              {errorMessage}
             </p>
           )}
         </form>
